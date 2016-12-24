@@ -1,0 +1,6 @@
+name = AurumPay Payment Integration
+description = AurumPay Integration
+package = AurumPay
+core = 7.x
+
+dependencies[] = addressfield_ph

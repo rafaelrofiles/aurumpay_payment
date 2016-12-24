@@ -1,0 +1,128 @@
+<?php
+
+/**
+ * Form definition for BayadCenter Form.
+ */
+function aurumpay_payment_otc_form($form, &$form_state, $user_id, $order_id) {
+  global $base_url;
+  $base = array(
+    '#type' => 'textfield',
+    '#required' => TRUE,
+  );
+  $hidden = array(
+    '#type' => 'hidden',
+    '#required' => TRUE,
+  );
+  $user = user_load($user_id);
+  $order = commerce_order_load($order_id);
+  if ( (bool)$order ) {
+    $addressfield = array();
+    
+    $profile_id = field_get_items('commerce_order', $order, 'commerce_customer_billing');
+
+    $customer_profile = commerce_customer_profile_load(isset($profile_id) ? $profile_id[0]['profile_id'] : 0);
+
+    if ($customer_profile)
+      $addressfield = field_get_items('commerce_customer_profile', $customer_profile, 'commerce_customer_address');
+
+    $fee = ( !empty($order->commerce_order_total) ) ? $order->commerce_order_total['und'][0]['amount'] : FALSE;
+    $fee = ( $fee ) ? $fee / 100 : 0;
+    $fee = sprintf("%01.2f", $fee);
+
+    $form['endpoint'] = $hidden + array(
+      '#value' => variable_get(PAYMENT_METHOD_OTC . '_mid'),
+    );
+    $form['login'] = $hidden + array(
+      '#value' => variable_get(PAYMENT_METHOD_OTC . '_login'),
+    );
+    $form['merchant_control'] = $hidden + array(
+      '#value' => variable_get(PAYMENT_METHOD_OTC . '_control_key'),
+    );
+    $form['merchant_name'] = $hidden + array(
+      '#value' => '',
+    );
+    $form['user_id'] = array(
+      '#type' => 'hidden',
+      '#value' => $user_id,  
+    );
+    $form['ipaddress'] = $hidden + array(
+      '#value' => $_SERVER['REMOTE_ADDR'],
+    );
+    $form['server_callback_url'] = $hidden + array(
+      '#value' => $base_url . '/aurumpay_callback',
+    );
+    $form['merchant_redirect'] = $hidden + array(
+      '#value' => $base_url . '/' . variable_get('aurumpay_payment_redirect_url'),
+    );
+    $form['client_orderid'] = $hidden + array(
+      '#value' => $order_id,
+    );
+    $form['payment_method'] = $hidden + array(
+      '#value' => PAYMENT_METHOD_OTC,
+    );
+    $form['country'] = $hidden + array(
+      '#value' => 'PH',
+    );
+    $form['currency'] = $hidden + array(
+      '#value' => 'PHP',
+    );
+    $form['order_desc'] = array(
+      '#type'  => 'hidden',
+      '#value' => '',
+    );
+    $form['amount'] = $hidden + array(
+      '#value' => $fee,
+    );
+    $form['order_id'] = array(
+      '#title' => 'Order ID',
+      '#type' => 'textfield',
+      '#value' => $order_id,
+      '#disabled' => TRUE,
+    );
+    $form['display_amount'] = $base + array(
+      '#title' => 'Amount',
+      '#value' => $fee,
+      '#disabled' => TRUE,
+    );
+    $form['first_name'] = $base + array(
+      '#title' => 'First Name',
+      '#default_value' => $addressfield ? $addressfield[0]['first_name'] : '',
+    );
+    $form['last_name'] = $base + array(
+      '#title' => 'Last Name',
+      '#default_value' => $addressfield ? $addressfield[0]['last_name'] : '',
+    );
+    $form['address1'] = $base + array(
+      '#title' => 'Address',
+      '#default_value' => $addressfield ? $addressfield[0]['thoroughfare'] : '',
+    );
+    $form['city'] = $base + array(
+      '#title' => 'City',
+      '#default_value' => $addressfield ? $addressfield[0]['locality'] : '',
+    );
+    $form['zip_code'] = $base + array(
+      '#title' => 'Zip Code',
+      '#default_value' => $addressfield ? $addressfield[0]['postal_code'] : '',
+    );
+    $form['phone'] = $base + array(
+      '#title' => 'Phone',
+    );
+    $form['email'] = $base + array(
+      '#title' => 'Email',
+      '#default_value' => $user ? $user->mail : '',
+    );
+    $form['addons'] = array(
+      '#prefix' => '<div class="addons-wrapper">',
+      '#suffix' => '</div>',
+    );
+    $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => 'Submit',
+      '#validate' => array('aurumpay_payment_validate'),
+    );
+    $form['#action'] = variable_get(PAYMENT_METHOD_OTC . '_sale_url');
+    $form['#method'] = 'POST';
+
+    return $form;
+  }
+}

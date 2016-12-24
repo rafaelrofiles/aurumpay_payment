@@ -1,0 +1,431 @@
+<?php
+
+define('PAYMENT_METHOD_BANCNET', 'bancnet');
+define('PAYMENT_METHOD_MLHUILLIER', 'mlhuillier');
+define('PAYMENT_METHOD_OTC', 'otc');
+define('PAYMENT_METHOD_GCASH', 'gcash');
+define('PAYMENT_METHOD_SMARTMONEY', 'smart_money');
+
+define('PAYMENT_LABEL_BANCNET', 'BancNet');
+define('PAYMENT_LABEL_MLHUILLIER', 'MLhuillier');
+define('PAYMENT_LABEL_OTC', 'Bayad Center, LBC, Robinsons, USSC, Palawan, etc.');
+define('PAYMENT_LABEL_GCASH', 'GCash');
+define('PAYMENT_LABEL_SMARTMONEY', 'Smart Money');
+
+module_load_include('inc', 'aurumpay_payment', 'aurumpay_payment.helper');
+
+module_load_include('inc', 'aurumpay_payment', 'forms/aurumpay_payment_bancnet.form');
+module_load_include('inc', 'aurumpay_payment', 'forms/aurumpay_payment_mlhuillier.form');
+module_load_include('inc', 'aurumpay_payment', 'forms/aurumpay_payment_otc.form');
+module_load_include('inc', 'aurumpay_payment', 'forms/aurumpay_payment_gcash.form');
+module_load_include('inc', 'aurumpay_payment', 'forms/aurumpay_payment_smartmoney.form');
+
+global $payment_methods;
+
+$payment_methods = array(
+  PAYMENT_METHOD_BANCNET => PAYMENT_LABEL_BANCNET,
+  PAYMENT_METHOD_MLHUILLIER => PAYMENT_LABEL_MLHUILLIER,
+  PAYMENT_METHOD_OTC => PAYMENT_LABEL_OTC,
+  PAYMENT_METHOD_GCASH => PAYMENT_LABEL_GCASH,
+  // PAYMENT_METHOD_SMARTMONEY => PAYMENT_LABEL_SMARTMONEY,
+);
+
+/**
+ * Implements hook_menu().
+ */
+function aurumpay_payment_menu() {
+  $items['admin/config/aurumpay_payment'] = array(
+    'title' => 'AurumPay Payment Settings',
+    'description' => 'Settings page for AurumPay Payment Module',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('aurumpay_payment_settings_form'),
+    'access arguments' => array('administer aurumpay payment module'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['aurumpay_callback'] = array(
+    'page callback' => 'aurumpay_payment_aurumpay_callback',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['aurum_pay/%/%/%'] = array(
+    'page callback' => 'aurumpay_payment_select_form',
+    'page arguments' => array(1, 2, 3),
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function aurumpay_payment_permission() {
+  $perm['administer aurumpay payment module'] = array(
+    'title' => 'Administer AurumPay Payment Module',
+    'description' => 'Perform administrative tasks on AurumPay Payment Module',
+  );
+
+  return $perm;
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function aurumpay_payment_block_info() {
+  $block['mc_cb_aurumpay_status'] = array(
+    'info' => 'MC: CB - AurumPay Status',
+  );
+
+  return $block;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function aurumpay_payment_block_view($delta = '') {
+  $block = array();
+  switch($delta) {
+    case 'mc_cb_aurumpay_status':
+      $block['content'] = aurumpay_payment_status_callback();
+      break;
+  }
+
+  return $block;
+}
+
+/**
+ * Form definition for AurumPay Payment Settings.
+ */
+function aurumpay_payment_settings_form($form, &$form_state) {
+  global $payment_methods;
+
+  $base_textfield = array(
+    '#type' => 'textfield',
+    '#required' => TRUE,
+  );
+  $form['aurumpay_payment_redirect_url'] = $base_textfield + array(
+    '#title' => 'Redirect URL',
+    '#default_value' => variable_get('aurumpay_payment_redirect_url'),
+  );
+
+  foreach($payment_methods as $payment_method => $payment_label) {
+    $form[$payment_method] = array(
+      '#title' => $payment_label,
+      '#type' => 'fieldset',
+    );
+    $form[$payment_method][$payment_method . '_mid'] = $base_textfield + array(
+      '#title' => 'Merchant ID',
+      '#default_value' => variable_get($payment_method . '_mid', ''),
+    );
+    $form[$payment_method][$payment_method . '_login'] = $base_textfield + array(
+      '#title' => 'Login',
+      '#default_value' => variable_get($payment_method . '_login', ''),
+    );
+    $form[$payment_method][$payment_method . '_password'] = array(
+      '#title' => 'Password',
+      '#type' => 'textfield',
+      '#required' => TRUE,
+      '#default_value' => variable_get($payment_method . '_password', ''),
+    );
+    $form[$payment_method][$payment_method . '_control_key'] = $base_textfield + array(
+      '#title' => 'Control Key',
+      '#default_value' => variable_get($payment_method . '_control_key', ''),
+    );
+    $form[$payment_method][$payment_method . '_sale_url'] = $base_textfield + array(
+      '#title' => 'Sale URL',
+      '#default_value' => variable_get($payment_method . '_sale_url', ''),
+    );
+  }
+
+  return system_settings_form($form);
+}
+
+/**
+ * Callback function for AurumPay to confirm payment.
+ */
+function aurumpay_payment_aurumpay_callback() {
+
+  if ( $_GET['control'] != sha1($_GET['status'] . $_GET['orderid'] . $_GET['client_orderid'] . $control_key) ) {
+
+    return 'Invalid Code.';
+  }
+
+  if ( $_GET['status'] == 'approved' && $_GET['type'] == 'sale' ) {
+    $order = commerce_order_load($_GET['client_orderid']);
+    if ($order) {
+      db_update('commerce_order')
+        ->fields(array(
+          'status' => 'completed',
+        ))
+        ->condition('type', 'commerce_order')
+        ->condition('order_id', $_GET['client_orderid'])
+        ->execute();
+    } else {
+      return 'Incorrect Client Order ID';
+    }
+  }
+
+  return 'Success';
+}
+
+/**
+ * Callback function for AurumPay Forms.
+ */
+function aurumpay_payment_select_form($user_id, $payment_method, $order_id) {
+  global $payment_methods;
+  global $user;
+
+  if ($user->uid <> $user_id)
+    return 'Invalid Order';
+
+  foreach($payment_methods as $payment_method_key => $payment_label) {
+    drupal_set_title($payment_label);
+    if ($payment_method_key == $payment_method) {
+      $aurum_pay_form = drupal_get_form('aurumpay_payment_' . $payment_method_key . '_form', $user_id, $order_id);
+      return drupal_render($aurum_pay_form);
+    }
+  }
+
+  return 'Invalid Order';
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function aurumpay_payment_form_alter(&$form, &$form_state, $form_id) {
+  global $payment_methods;
+
+  $options = array(
+    'attributes' => array(
+      'target' => '_blank',
+    )
+  );
+
+  foreach($payment_methods as $payment_method_key => $payment_label) {
+    if ($form_id == 'aurumpay_payment_' . $payment_method_key . '_form') {
+      $form['addons']['terms_and_condition'] = array(
+        '#type'  => 'checkbox',
+        '#title' => t('I agree to the ' . l('Terms and Conditions Agreement', 'terms-and-conditions', $options)),
+      );
+      $form['addons']['refund_and_cancellation'] = array(
+        '#type'  => 'checkbox',
+        '#title' => t('I agree to the ' . l('Refund and Cancellation Policy', 'refund-and-cancellation', $options)),
+      );
+      $form['logo'] = array(
+        '#markup' => _aurumpay_payment_aurumpay_logo(),
+      );
+    }
+  }
+}
+
+/**
+ * Validates AurumPay Forms.
+ */
+function aurumpay_payment_validate($form, &$form_state) {
+
+  if (!$form_state['values']['terms_and_condition']) {
+    form_set_error('terms_condition', 'You must agree to the terms and condition.');
+  }
+
+  if ( !isset($form_state['values']['refund_and_cancellation']) ) {
+    form_set_error('order_id', 'You haven\'t placed any order yet.');
+  }
+
+  if ( !isset($form_state['values']['order_id']) ) {
+    form_set_error('order_id', 'You haven\'t placed any order yet.');
+  }
+}
+
+/**
+ * Send request callback for AurumPay Forms.
+ */
+function aurumpay_payment_send_request($form, &$form_state) {
+  global $base_url;
+  $control = _aurumpay_payment_send_request_control(
+    variable_get($form_state['values']['payment_method'] . '_mid'),
+    $form_state['values']['order_id'],
+    $form_state['values']['amount'],
+    $form_state['values']['email'],
+    variable_get($form_state['values']['payment_method'] . '_control_key')
+  );
+
+  $requestFields = array(
+    'endpoint' => variable_get($form_state['values']['payment_method'] . '_mid'),
+    'client_orderid' => $form_state['values']['order_id'],
+    'order_desc' => 'AurumPay Online Order',
+    'first_name' => $form_state['values']['first_name'],
+    'last_name' => $form_state['values']['last_name'],
+    'address1' => $form_state['values']['address1'],
+    'city' => $form_state['values']['city'],
+    'zip_code' => $form_state['values']['zip_code'],
+    'country' => $form_state['values']['country'],
+    'phone' => $form_state['values']['phone'],
+    'amount' => $form_state['values']['amount'],
+    'email' => $form_state['values']['email'],
+    'currency' => $form_state['values']['currency'],
+    'ipaddress' => $_SERVER['REMOTE_ADDR'],
+    'redirect_url' => $base_url . url(variable_get('aurumpay_payment_redirect_url')),
+    'server_callback_url' => $base_url . '/aurumpay_callback',
+    'control' => $control, 
+  );
+
+  $responseFields = sendRequest(variable_get($form_state['values']['payment_method'] . '_sale_url'), $requestFields);
+
+  $options['external'] = TRUE;
+  drupal_goto($responseFields['redirect-url'], $options);
+}
+
+/**
+ * Display the content for the AurumPay Status Block.
+ */
+function aurumpay_payment_status_callback() {
+
+  $form = drupal_get_form('aurumpay_payment_check_status_form');
+
+  // return drupal_render($form);
+}
+
+/**
+ * Form definition for checking status AurumPay.
+ */
+function aurumpay_payment_check_status_form($form, &$form_state) {
+  global $payment_methods;
+  $base = array(
+    '#type' => 'textfield',
+    '#required' => TRUE,
+  );
+  $form['client_orderid'] = $base + array(
+    '#title' => 'Order ID',
+  );
+  $form['orderid'] = $base + array(
+    '#title' => 'AurumPay Transaction ID',
+  );
+  $form['payment_method'] = array(
+    '#title' => 'Payment Method',
+    '#type' => 'select',
+    '#options' => $payment_methods,
+  );
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => 'Submit',
+  );
+
+  return $form;
+}
+
+/**
+ * Submit handler for checking status AurumPay.
+ */
+function aurumpay_payment_check_status_form_submit($form, &$form_state) {
+  dsm($form_state);
+
+  // $requestFields = array(
+  //   'login' => variable_get($payment_method . '_login'), 
+  //   'client_orderid' => $client_orderid,
+  //   'orderid' => $orderid,
+  //   'by-request-sn' => '00000000-0000-0000-0000-0000005b2a8a', 
+  //   'control' => _aurumpay_payment_status_request_control(
+  //     variable_get($payment_method . '_login'),
+  //     $client_orderid,
+  //     $orderid,
+  //     variable_get($payment_method . '_control_key')
+  //   ),
+  // );
+
+  // $responseFields = sendRequest('https://sandbox.payneteasy.com/paynet/api/v2/status/1', $requestFields);
+}
+
+/**
+ * Executes request
+ *
+ * @param       string      $url                Url for payment method
+ * @param       array       $requestFields      Request data fields
+ *
+ * @return      array                           Host response fields
+ *
+ * @throws      RuntimeException                Error while executing request
+ */
+function sendRequest($url, array $requestFields) {
+    $curl = curl_init($url);
+
+    curl_setopt_array($curl, array(
+      CURLOPT_HEADER         => 0,
+      CURLOPT_USERAGENT      => 'PaynetEasy-Client/1.0',
+      CURLOPT_SSL_VERIFYHOST => 0,
+      CURLOPT_SSL_VERIFYPEER => 0,
+      CURLOPT_POST           => 1,
+      CURLOPT_RETURNTRANSFER => 1
+    ));
+
+    curl_setopt($curl, CURLOPT_POSTFIELDS, http_build_query($requestFields));
+
+    $response = curl_exec($curl);
+
+    if(curl_errno($curl)) {
+      $error_message  = 'Error occurred: ' . curl_error($curl);
+      $error_code     = curl_errno($curl);
+    } elseif(curl_getinfo($curl, CURLINFO_HTTP_CODE) == 302) {
+      $response = 'http-code=' . curl_getinfo($curl, CURLINFO_HTTP_CODE);
+      $response .= '&redirect-url=' . curl_getinfo($curl, CURLINFO_REDIRECT_URL);
+    } elseif(curl_getinfo($curl, CURLINFO_HTTP_CODE) != 200) {
+      $error_code     = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+      $error_message  = "Error occurred. HTTP code: '{$error_code}'";
+    }
+
+    curl_close($curl);
+
+    if (!empty($error_message)) {
+      throw new RuntimeException($error_message, $error_code);
+      return $error_code . ' ' . $error_message;
+    }
+
+    if(empty($response)) {
+      throw new RuntimeException('Host response is empty');
+      return 'Host response is empty';
+    }
+
+    $responseFields = array();
+
+    parse_str($response, $responseFields);
+
+    return $responseFields;
+}
+
+function signString($s, $merchantControl) {
+
+  return sha1($s . $merchantControl);
+}
+
+/**
+ * Signs payment (sale/auth/transfer) request
+ *
+ * @param   array   $requestFields    request array
+ * @param string    $endpointOrGroupId  endpoint or endpoint group ID
+ * @param string    $merchantControl  merchant control key
+ */
+function signPaymentRequest($requestFields, $endpointOrGroupId, $merchantControl)  {
+  $base = '';
+  $base .= $endpointOrGroupId;
+  $base .= $requestFields['client_orderid'];
+  $base .= $requestFields['amount'] * 100;
+  $base .= $requestFields['email'];
+
+  return signString($base, $merchantControl);
+}
+
+/**
+ * Signs status request
+ *
+ * @param   array   $requestFields    request array
+ * @param string    $login      merchant login
+ * @param string    $merchantControl  merchant control key
+ */
+function signStatusRequest($requestFields, $login, $merchantControl)  {
+  $base = '';
+  $base .= $login;
+  $base .= $requestFields['client_orderid'];
+  $base .= $requestFields['orderid'];
+
+  return signString($base, $merchantControl);
+}
